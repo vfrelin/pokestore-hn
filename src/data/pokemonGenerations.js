@@ -163,11 +163,22 @@ export function getCardFinishCategory(card) {
   const name = (card.name || '').toLowerCase();
   const subtypes = Array.isArray(card.subtypes) ? card.subtypes.map(s => s.toLowerCase()) : [];
 
+  // Known sets where 100% of cards are Holofoil/Foil by manufacture design
+  const setName = (card.set?.name || '').toLowerCase();
+  const setId = (card.set?.id || '').toLowerCase();
+  const isAllHoloSet = 
+    setName.includes('celebrations') || 
+    setId === 'cel25' || 
+    setId === 'cel25c' ||
+    setName.includes('detective pikachu') ||
+    setName.includes('dragon vault') ||
+    setName.includes('double crisis');
+
   if (supertype === 'trainer' || subtypes.includes('supporter') || subtypes.includes('item') || subtypes.includes('stadium')) {
     return 'trainer';
   }
 
-  // Full Art / Special Illustration / Secret Rare / Alt Art
+  // Full Art / Special Illustration / Secret Rare / Alt Art / Hyper Rare
   const isFullArt = 
     rarity.includes('special illustration') ||
     rarity.includes('illustration rare') ||
@@ -176,11 +187,11 @@ export function getCardFinishCategory(card) {
     rarity.includes('hyper rare') ||
     rarity.includes('shiny rare') ||
     rarity.includes('shiny ultra') ||
+    rarity.includes('classic collection') ||
     subtypes.includes('vmax') ||
     subtypes.includes('vstar') ||
     subtypes.includes('radiant') ||
     rarity.includes('full art') ||
-    rarity.includes('promo') ||
     name.includes(' ex') ||
     name.includes(' gx') ||
     name.includes(' vmax') ||
@@ -188,13 +199,19 @@ export function getCardFinishCategory(card) {
 
   if (isFullArt) return 'fullart';
 
-  // Holo
+  // Holo (Including Celebrations, Double Rare, Amazing Rare, ACE SPEC, etc.)
   const isHolo = 
+    isAllHoloSet ||
     rarity.includes('holo') ||
     rarity.includes('rare holo') ||
     rarity.includes('reverse') ||
     rarity.includes('radiant') ||
-    rarity.includes('amazing');
+    rarity.includes('amazing') ||
+    rarity.includes('double rare') ||
+    rarity.includes('ace spec') ||
+    rarity.includes('shining') ||
+    rarity.includes('promo') ||
+    (card.notes && card.notes.toLowerCase().includes('holo'));
 
   if (isHolo) return 'holo';
 
