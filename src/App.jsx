@@ -233,10 +233,18 @@ export default function App() {
     return cards.filter(card => {
       // Search matching (name, set, card number, rarity)
       const q = searchQuery.toLowerCase().trim();
+
+      // Normalize number for flexible matching:
+      // "94/192" finds a card stored as "094/192" and vice-versa
+      const stripZeros = (s) => s.replace(/^0+(\d)/, '$1').replace(/\/0+(\d)/, '/$1');
+      const cardNumNorm = stripZeros(card.number.toLowerCase());
+      const qNorm = stripZeros(q);
+
       const matchesSearch = !q || (
         card.name.toLowerCase().includes(q) ||
         card.set?.name.toLowerCase().includes(q) ||
         card.number.toLowerCase().includes(q) ||
+        cardNumNorm.includes(qNorm) ||
         (card.rarity && card.rarity.toLowerCase().includes(q))
       );
 
