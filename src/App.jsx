@@ -55,7 +55,7 @@ export default function App() {
     async function loadCloudData() {
       try {
         const cloudCards = await fetchCardsFromCloud(supabase);
-        if (isMounted && cloudCards && cloudCards.length > 0) {
+        if (isMounted && Array.isArray(cloudCards)) {
           setCards(cloudCards);
           saveInventory(cloudCards);
         }
