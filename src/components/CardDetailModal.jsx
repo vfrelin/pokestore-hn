@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, MapPin, Sparkles, Plus, Minus, ShoppingBag, Check, Shield, Calendar, Layers, Globe } from 'lucide-react';
+import { X, MapPin, Sparkles, Plus, Minus, ShoppingBag, Check, Shield, ShieldCheck, Calendar, Layers, Globe } from 'lucide-react';
 import PriceChart from './PriceChart';
 
 export default function CardDetailModal({
@@ -95,6 +95,18 @@ export default function CardDetailModal({
                   <span className="text-sm font-bold text-slate-300">
                     (${priceUsd.toFixed(2)} USD)
                   </span>
+                </div>
+              </div>
+
+              {/* Price Verification & Transparency Notice */}
+              <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 flex items-start gap-2.5">
+                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <div className="text-[11px] leading-relaxed text-slate-300">
+                  <div className="font-bold text-emerald-400 flex items-center gap-1.5 mb-0.5">
+                    <span>Precios Reales en Tiempo Real</span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  </div>
+                  Cotización oficial del mercado internacional (<strong>TCGPlayer USA</strong> y <strong>Cardmarket</strong>). Garantía de precio justo, transparente y 100% verificado según el valor real de coleccionista.
                 </div>
               </div>
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, X, Flame, Droplets, Leaf, Zap, Eye, Moon, Shield, Sparkles, Filter } from 'lucide-react';
+import { Search, X, Flame, Droplets, Leaf, Zap, Eye, Moon, Shield, Sparkles, Layers, Award, Star } from 'lucide-react';
 
 const TYPES_LIST = [
   { id: 'All', label: 'Todos', color: 'bg-slate-800 text-white' },
@@ -13,6 +13,23 @@ const TYPES_LIST = [
   { id: 'Trainer', label: 'Entrenadores', icon: Shield, color: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30' }
 ];
 
+const GENERATIONS_LIST = [
+  { id: 'All', label: 'Todas las Generaciones' },
+  { id: '1', label: '🔴 1ra Gen (Los 151 Originales Kanto)' },
+  { id: '2', label: '🟡 2da Gen (152-251 Johto)' },
+  { id: '3', label: '🟢 3ra Gen (252-386 Hoenn)' },
+  { id: '4', label: '🔵 4ta Gen (387-493 Sinnoh)' },
+  { id: 'other', label: '✨ 5ta Gen en adelante' }
+];
+
+const FINISHES_LIST = [
+  { id: 'All', label: 'Todos los acabados' },
+  { id: 'holo', label: '✨ Solo Holográficas (Holo / Reverse)' },
+  { id: 'normal', label: '🃏 Normales (Non-Holo)' },
+  { id: 'fullart', label: '👑 Full Art / Secret / EX / VMAX' },
+  { id: 'trainer', label: '🎒 Solo Entrenadores' }
+];
+
 export default function FilterBar({
   searchQuery,
   setSearchQuery,
@@ -20,6 +37,10 @@ export default function FilterBar({
   setSelectedType,
   selectedSet,
   setSelectedSet,
+  selectedGen = 'All',
+  setSelectedGen,
+  selectedFinish = 'All',
+  setSelectedFinish,
   sortBy,
   setSortBy,
   onlyInStock,
@@ -27,6 +48,14 @@ export default function FilterBar({
   availableSets = [],
   totalResults = 0
 }) {
+  const hasActiveFilters = 
+    Boolean(searchQuery) || 
+    selectedType !== 'All' || 
+    selectedSet !== 'All' || 
+    selectedGen !== 'All' || 
+    selectedFinish !== 'All' || 
+    onlyInStock;
+
   return (
     <div className="space-y-3 mb-6">
       {/* Main Search Input & Sorters */}
@@ -39,7 +68,7 @@ export default function FilterBar({
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Buscar por Pokémon, colección, # de carta o rareza..."
+            placeholder="Buscar por Pokémon (ej: Charizard), # (094/192)..."
             className="w-full bg-slate-900 border border-slate-800 rounded-2xl pl-10 pr-10 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50 transition-all shadow-inner"
           />
           {searchQuery && (
@@ -80,6 +109,65 @@ export default function FilterBar({
         </select>
       </div>
 
+      {/* Row 2: Generation Filter & Finish Filter */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {/* Generation Dropdown */}
+        <div className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 px-3 py-1.5 rounded-2xl">
+          <Award className="w-4 h-4 text-amber-400 shrink-0" />
+          <div className="flex-1">
+            <span className="text-[10px] uppercase tracking-wider text-slate-400 block font-bold">Generación Pokémon</span>
+            <select
+              value={selectedGen}
+              onChange={(e) => setSelectedGen(e.target.value)}
+              className="w-full bg-transparent text-white text-xs font-bold focus:outline-none cursor-pointer"
+            >
+              {GENERATIONS_LIST.map((g) => (
+                <option key={g.id} value={g.id} className="bg-slate-900 text-white">
+                  {g.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {selectedGen !== 'All' && (
+            <button
+              onClick={() => setSelectedGen('All')}
+              className="text-slate-400 hover:text-white p-1"
+              title="Quitar filtro de generación"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Finish / Card Style Dropdown */}
+        <div className="flex items-center gap-2 bg-slate-900/90 border border-slate-800 px-3 py-1.5 rounded-2xl">
+          <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+          <div className="flex-1">
+            <span className="text-[10px] uppercase tracking-wider text-slate-400 block font-bold">Acabado / Tipo de Carta</span>
+            <select
+              value={selectedFinish}
+              onChange={(e) => setSelectedFinish(e.target.value)}
+              className="w-full bg-transparent text-white text-xs font-bold focus:outline-none cursor-pointer"
+            >
+              {FINISHES_LIST.map((f) => (
+                <option key={f.id} value={f.id} className="bg-slate-900 text-white">
+                  {f.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {selectedFinish !== 'All' && (
+            <button
+              onClick={() => setSelectedFinish('All')}
+              className="text-slate-400 hover:text-white p-1"
+              title="Quitar filtro de acabado"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Type Filter Chips (Horizontal scrollable on mobile) */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none no-scrollbar">
         {TYPES_LIST.map((type) => {
@@ -116,17 +204,19 @@ export default function FilterBar({
       {/* Results Counter & Active Filter Reset */}
       <div className="flex items-center justify-between text-xs text-slate-400 px-1">
         <span>Mostrando <strong className="text-white font-bold">{totalResults}</strong> cartas disponibles</span>
-        {(searchQuery || selectedType !== 'All' || selectedSet !== 'All' || onlyInStock) && (
+        {hasActiveFilters && (
           <button
             onClick={() => {
               setSearchQuery('');
               setSelectedType('All');
               setSelectedSet('All');
+              setSelectedGen('All');
+              setSelectedFinish('All');
               setOnlyInStock(false);
             }}
-            className="text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1"
+            className="text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20"
           >
-            <X className="w-3.5 h-3.5" /> Limpiar filtros
+            <X className="w-3.5 h-3.5" /> Limpiar todos los filtros
           </button>
         )}
       </div>

@@ -20,6 +20,7 @@ import {
   fetchSettingsFromCloud,
   saveSettingsToCloud
 } from './services/supabase';
+import { getCardGeneration, getCardFinishCategory } from './data/pokemonGenerations';
 import { ShoppingBag, Sparkles, SlidersHorizontal, ArrowUp } from 'lucide-react';
 
 export default function App() {
@@ -37,6 +38,8 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState('All');
   const [selectedSet, setSelectedSet] = useState('All');
+  const [selectedGen, setSelectedGen] = useState('All');
+  const [selectedFinish, setSelectedFinish] = useState('All');
   const [sortBy, setSortBy] = useState('price-desc');
   const [onlyInStock, setOnlyInStock] = useState(false);
 
@@ -256,10 +259,28 @@ export default function App() {
       // Set matching
       const matchesSet = selectedSet === 'All' || card.set?.name === selectedSet;
 
+      // Generation matching (by Pokemon name)
+      let matchesGen = true;
+      if (selectedGen !== 'All') {
+        const gen = getCardGeneration(card);
+        if (selectedGen === '1') matchesGen = (gen === 1);
+        else if (selectedGen === '2') matchesGen = (gen === 2);
+        else if (selectedGen === '3') matchesGen = (gen === 3);
+        else if (selectedGen === '4') matchesGen = (gen === 4);
+        else if (selectedGen === 'other') matchesGen = (gen === 5 || gen === null);
+      }
+
+      // Finish / Card style matching
+      let matchesFinish = true;
+      if (selectedFinish !== 'All') {
+        const finish = getCardFinishCategory(card);
+        matchesFinish = (finish === selectedFinish);
+      }
+
       // Stock matching
       const matchesStock = !onlyInStock || card.stock > 0;
 
-      return matchesSearch && matchesType && matchesSet && matchesStock;
+      return matchesSearch && matchesType && matchesSet && matchesGen && matchesFinish && matchesStock;
     }).sort((a, b) => {
       const priceA = a.customPriceUsd !== null && a.customPriceUsd !== undefined ? a.customPriceUsd : a.marketPriceUsd;
       const priceB = b.customPriceUsd !== null && b.customPriceUsd !== undefined ? b.customPriceUsd : b.marketPriceUsd;
@@ -278,7 +299,7 @@ export default function App() {
           return 0;
       }
     });
-  }, [cards, searchQuery, selectedType, selectedSet, onlyInStock, sortBy]);
+  }, [cards, searchQuery, selectedType, selectedSet, selectedGen, selectedFinish, onlyInStock, sortBy]);
 
   const totalCartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
   const totalStockInApp = cards.reduce((sum, c) => sum + (c.stock || 0), 0);
@@ -346,6 +367,10 @@ export default function App() {
               setSelectedType={setSelectedType}
               selectedSet={selectedSet}
               setSelectedSet={setSelectedSet}
+              selectedGen={selectedGen}
+              setSelectedGen={setSelectedGen}
+              selectedFinish={selectedFinish}
+              setSelectedFinish={setSelectedFinish}
               sortBy={sortBy}
               setSortBy={setSortBy}
               onlyInStock={onlyInStock}
@@ -380,6 +405,21 @@ export default function App() {
                 })}
               </div>
             )}
+
+            {/* Footer with secondary Admin shortcut button */}
+            <footer className="mt-12 mb-16 pt-6 border-t border-slate-900 text-center text-xs text-slate-500 space-y-3">
+              <div>
+                <button
+                  onClick={handleToggleAdminClick}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-300 border border-slate-800 hover:border-amber-500/30 transition-all font-bold shadow-lg"
+                >
+                  <span>🔐 Administrar Inventario y Precios</span>
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                {settings.storeName} • Cotizaciones basadas en precios oficiales del mercado Pokémon TCG
+              </p>
+            </footer>
           </div>
         )}
       </main>

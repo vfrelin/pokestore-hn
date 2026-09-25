@@ -64,27 +64,27 @@ export default function Header({
               <span className="font-bold text-amber-400">L. {Number(settings.exchangeRate).toFixed(2)}</span>
             </div>
 
-            {/* Admin / Seller Toggle */}
+            {/* Admin / Seller Toggle - Generous touch target and comfortable position */}
             <button
               onClick={onToggleAdmin}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all ${
+              className={`flex items-center justify-center gap-1.5 px-3.5 py-2.5 min-h-[42px] rounded-2xl text-xs font-black transition-all active:scale-95 shadow-md ${
                 isAdmin
-                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-lg shadow-amber-500/25 ring-2 ring-amber-400/50'
-                  : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800'
+                  ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-amber-500/25 ring-2 ring-amber-400/50'
+                  : 'bg-slate-900/95 hover:bg-slate-800 text-amber-300 border border-amber-500/30 hover:border-amber-400/60 shadow-black/40'
               }`}
               title="Panel de inventario y gestión"
             >
               {isAdmin ? (
                 <>
-                  <ShieldCheck className="w-4 h-4" />
+                  <ShieldCheck className="w-4 h-4 text-slate-950" />
                   <span className="hidden sm:inline">Modo Vendedor</span>
                   <span className="sm:hidden">Admin</span>
                 </>
               ) : (
                 <>
-                  <Lock className="w-3.5 h-3.5 text-amber-400" />
+                  <Lock className="w-4 h-4 text-amber-400" />
                   <span className="hidden sm:inline">Gestionar</span>
-                  <span className="sm:hidden">Admin</span>
+                  <span className="sm:hidden font-bold">Admin</span>
                 </>
               )}
             </button>
