@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, Image as ImageIcon, Sparkles, RefreshCw, Check, X, AlertCircle, Loader2 } from 'lucide-react';
+import { Camera, Image as ImageIcon, Sparkles, RefreshCw, Check, X, AlertCircle, Loader2, Zap } from 'lucide-react';
 import { scanAndIdentifyCard } from '../../services/cardScanner';
 
 export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 25 }) {
@@ -25,7 +25,7 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
 
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: { ideal: 'environment' }, // Uses rear camera on phones
+          facingMode: { ideal: 'environment' }, // Uses rear camera on mobile
           width: { ideal: 1280 },
           height: { ideal: 720 }
         },
@@ -38,7 +38,7 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
       }
     } catch (err) {
       console.warn('Camera access error:', err);
-      setCameraError('No se pudo acceder a la cámara directamente. Puedes usar el botón de subir foto de tu galería.');
+      setCameraError('No se pudo abrir la cámara en vivo. Puedes subir una foto desde tu galería o usar la pestaña de texto.');
     }
   };
 
@@ -95,7 +95,7 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
   // Run OCR and card identification
   const processScannedImage = async (imageDataUrl) => {
     setIsScanning(true);
-    setScanProgress({ percent: 10, message: 'Iniciando reconocimiento...' });
+    setScanProgress({ percent: 10, message: 'Iniciando escaneo...' });
     setScanResults(null);
     setDetectedText(null);
 
@@ -125,10 +125,10 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
   return (
     <div className="space-y-4">
       
-      {/* Viewfinder / Captured Photo Area */}
-      <div className="relative aspect-[3/4] max-w-sm mx-auto bg-slate-950 rounded-3xl overflow-hidden border-2 border-slate-800 shadow-2xl flex items-center justify-center">
+      {/* Mobile-First Camera Viewfinder with Native Controls Overlay */}
+      <div className="relative w-full max-w-sm mx-auto h-[380px] xs:h-[420px] bg-slate-950 rounded-3xl overflow-hidden border-2 border-slate-800 shadow-2xl flex flex-col justify-between">
         
-        {/* Live Camera View */}
+        {/* Live Camera Feed */}
         {!capturedImage ? (
           <>
             <video
@@ -136,29 +136,65 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
               autoPlay
               playsInline
               muted
-              className="w-full h-full object-cover"
+              className="absolute inset-0 w-full h-full object-cover"
             />
 
             {/* Target Card Guide Overlay */}
-            <div className="absolute inset-0 pointer-events-none p-6 flex flex-col items-center justify-center">
-              <div className="w-full aspect-[2.5/3.5] border-2 border-amber-400/80 rounded-2xl relative shadow-[0_0_0_9999px_rgba(2,6,23,0.65)]">
-                {/* Corner markers */}
-                <div className="absolute -top-1 -left-1 w-4 h-4 border-t-4 border-l-4 border-amber-400 rounded-tl"></div>
-                <div className="absolute -top-1 -right-1 w-4 h-4 border-t-4 border-r-4 border-amber-400 rounded-tr"></div>
-                <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-4 border-l-4 border-amber-400 rounded-bl"></div>
-                <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-4 border-r-4 border-amber-400 rounded-br"></div>
+            <div className="absolute inset-0 pointer-events-none p-5 pb-20 flex flex-col items-center justify-center">
+              <div className="w-full max-w-[240px] aspect-[2.5/3.5] border-2 border-amber-400/90 rounded-2xl relative shadow-[0_0_0_9999px_rgba(2,6,23,0.55)]">
+                {/* Glowing corner markers */}
+                <div className="absolute -top-1 -left-1 w-4 h-4 border-t-4 border-l-4 border-amber-400 rounded-tl shadow-[0_0_8px_#f59e0b]"></div>
+                <div className="absolute -top-1 -right-1 w-4 h-4 border-t-4 border-r-4 border-amber-400 rounded-tr shadow-[0_0_8px_#f59e0b]"></div>
+                <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-4 border-l-4 border-amber-400 rounded-bl shadow-[0_0_8px_#f59e0b]"></div>
+                <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-4 border-r-4 border-amber-400 rounded-br shadow-[0_0_8px_#f59e0b]"></div>
 
-                <div className="absolute bottom-2 left-0 right-0 text-center">
-                  <span className="text-[10px] font-black bg-slate-950/80 text-amber-300 px-2 py-0.5 rounded-full border border-amber-400/30">
-                    Centra la carta aquí
+                <div className="absolute -bottom-7 left-0 right-0 text-center">
+                  <span className="text-[10px] font-black bg-slate-950/90 text-amber-300 px-2.5 py-1 rounded-full border border-amber-400/40 shadow-lg">
+                    Centra la carta y presiona el botón abajo
                   </span>
                 </div>
               </div>
             </div>
+
+            {/* Native Mobile Shutter Bar (ALWAYS VISIBLE OVER CAMERA) */}
+            <div className="absolute bottom-0 inset-x-0 p-3 bg-gradient-to-t from-slate-950 via-slate-950/80 to-transparent flex items-center justify-around z-30">
+              
+              {/* Gallery upload shortcut */}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-11 h-11 rounded-2xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 border border-slate-700 flex items-center justify-center shadow-lg active:scale-90 transition-all"
+                title="Subir foto desde galería"
+              >
+                <ImageIcon className="w-5 h-5 text-emerald-400" />
+              </button>
+
+              {/* Big Shutter Button */}
+              <button
+                type="button"
+                onClick={handleCapturePhoto}
+                className="group relative w-16 h-16 rounded-full bg-slate-950 border-4 border-amber-400 p-1 flex items-center justify-center shadow-[0_0_20px_rgba(245,158,11,0.4)] active:scale-95 transition-all"
+                title="Capturar y escanear carta"
+              >
+                <div className="w-full h-full rounded-full bg-gradient-to-tr from-amber-500 to-orange-500 group-hover:from-amber-400 group-hover:to-orange-400 flex items-center justify-center shadow-inner">
+                  <Camera className="w-6 h-6 text-slate-950 stroke-[2.5]" />
+                </div>
+              </button>
+
+              {/* Placeholder balance / Cancel */}
+              <button
+                type="button"
+                onClick={onCancel}
+                className="w-11 h-11 rounded-2xl bg-slate-900/90 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700 flex items-center justify-center shadow-lg active:scale-90 transition-all"
+                title="Cerrar cámara"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </>
         ) : (
-          /* Captured Photo Preview */
-          <div className="relative w-full h-full">
+          /* Captured Photo Preview & Processing */
+          <div className="relative w-full h-full flex flex-col items-center justify-center">
             <img
               src={capturedImage}
               alt="Carta capturada"
@@ -167,16 +203,16 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
 
             {/* Scanning Laser Animation */}
             {isScanning && (
-              <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-[1px] flex flex-col items-center justify-center p-4">
-                <div className="w-full h-1 bg-gradient-to-r from-transparent via-amber-400 to-transparent shadow-[0_0_15px_#f59e0b] animate-bounce mb-4"></div>
-                <Loader2 className="w-8 h-8 text-amber-400 animate-spin mb-2" />
-                <span className="text-xs font-bold text-white text-center">
-                  {scanProgress?.message || 'Procesando imagen...'}
+              <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-[2px] flex flex-col items-center justify-center p-5 z-20">
+                <div className="w-full h-1 bg-gradient-to-r from-transparent via-amber-400 to-transparent shadow-[0_0_20px_#f59e0b] animate-bounce mb-5"></div>
+                <Loader2 className="w-10 h-10 text-amber-400 animate-spin mb-3" />
+                <span className="text-sm font-black text-white text-center">
+                  {scanProgress?.message || 'Identificando carta Pokémon...'}
                 </span>
-                <div className="w-48 bg-slate-800 rounded-full h-1.5 mt-3 overflow-hidden">
+                <div className="w-48 bg-slate-800 rounded-full h-2 mt-3 overflow-hidden border border-slate-700">
                   <div
-                    className="bg-amber-400 h-full transition-all duration-300"
-                    style={{ width: `${scanProgress?.percent || 20}%` }}
+                    className="bg-gradient-to-r from-amber-500 to-emerald-400 h-full transition-all duration-300"
+                    style={{ width: `${scanProgress?.percent || 25}%` }}
                   ></div>
                 </div>
               </div>
@@ -187,47 +223,25 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
         <canvas ref={canvasRef} className="hidden" />
       </div>
 
-      {/* Camera & File Upload Controls */}
-      {!capturedImage && (
-        <div className="flex items-center justify-center gap-3">
-          {/* Snap Photo Button */}
-          <button
-            onClick={handleCapturePhoto}
-            className="px-6 py-3.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black rounded-2xl text-xs flex items-center gap-2 shadow-xl shadow-amber-500/25 active:scale-95 transition-all"
-          >
-            <Camera className="w-5 h-5 stroke-[2.5]" />
-            <span>TOMAR FOTO AHORA</span>
-          </button>
-
-          {/* Upload from Gallery Button */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="px-4 py-3.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-2xl text-xs flex items-center gap-2 border border-slate-700 active:scale-95 transition-all"
-          >
-            <ImageIcon className="w-4 h-4 text-emerald-400" />
-            <span>Galería / Archivo</span>
-          </button>
-
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileUpload}
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-          />
-        </div>
-      )}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileUpload}
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+      />
 
       {/* Retake Button when photo already captured */}
       {capturedImage && !isScanning && (
         <div className="flex justify-center">
           <button
+            type="button"
             onClick={handleRetake}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-bold flex items-center gap-1.5 border border-slate-700 transition-colors"
+            className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-2xl text-xs font-black flex items-center gap-2 border border-slate-700 transition-all shadow-lg"
           >
-            <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
-            <span>Tomar otra foto</span>
+            <RefreshCw className="w-4 h-4 text-amber-400" />
+            <span>Tomar otra foto de la carta</span>
           </button>
         </div>
       )}
@@ -251,15 +265,15 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
               </span>
             </div>
             {detectedText?.name && (
-              <span className="text-[11px] text-amber-400 font-semibold bg-amber-400/10 px-2 py-0.5 rounded-lg border border-amber-400/20">
-                Texto detectado: "{detectedText.name}"
+              <span className="text-[11px] text-amber-400 font-semibold bg-amber-400/10 px-2 py-0.5 rounded-lg border border-amber-400/20 truncate max-w-[150px]">
+                Detectado: "{detectedText.name}"
               </span>
             )}
           </div>
 
           {scanResults.length === 0 ? (
             <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-800 text-center text-xs text-slate-400">
-              No se encontraron coincidencias exactas. Intenta tomar la foto con mejor luz o usa la pestaña de búsqueda por texto.
+              No se encontraron coincidencias exactas. Intenta tomar la foto más cerca o usa la pestaña de búsqueda por texto.
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[300px] overflow-y-auto p-1">
@@ -267,9 +281,9 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
                 <div
                   key={card.id}
                   onClick={() => onSelectCard(card)}
-                  className={`p-2 bg-slate-950 border rounded-2xl cursor-pointer transition-all flex flex-col group ${
+                  className={`p-2.5 bg-slate-950 border rounded-2xl cursor-pointer transition-all flex flex-col group active:scale-95 ${
                     idx === 0
-                      ? 'border-amber-400 shadow-lg shadow-amber-500/10 bg-gradient-to-b from-amber-500/5 to-slate-950'
+                      ? 'border-amber-400 shadow-xl shadow-amber-500/15 bg-gradient-to-b from-amber-500/10 to-slate-950 ring-1 ring-amber-400/50'
                       : 'border-slate-800 hover:border-slate-700'
                   }`}
                 >
