@@ -1,285 +1,228 @@
 import { createWorker } from 'tesseract.js';
 import { searchPokemonCards } from './pokemonApi';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// IMAGE PRE-PROCESSING
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * Crops the bottom footer strip of a card image and enhances it for OCR.
- * The card number (e.g. "072/197") appears in small but high-contrast text
- * on a white/light strip at the very bottom of every Pokémon card.
+ * Converts an image to grayscale + mild contrast boost on a new canvas.
+ * We intentionally avoid hard binarization — holographic cards have variable
+ * contrast and a fixed threshold destroys more text than it reveals.
  *
- * Strategy: NO binarization — use adaptive grayscale + mild contrast boost only.
- * Aggressive binarization destroys the text when card has slight shadow/glare.
- *
- * @param {string} imageSrc Data URL
- * @param {number} startYFrac  Top edge of crop as fraction of image height (0.0–1.0)
- * @param {number} heightFrac  Height of crop as fraction of image height (0.0–1.0)
- * @param {number} scale       Upscale multiplier (≥3 recommended for tiny footer text)
- * @returns {Promise<string>} Canvas data URL of the cropped+enhanced region
+ * @param {string} imageSrc  DataURL of source image
+ * @param {number} scale     Upscale factor (2.0 = double resolution for OCR)
+ * @returns {Promise<string>} DataURL of processed image
  */
-function cropFooterStrip(imageSrc, startYFrac = 0.82, heightFrac = 0.18, scale = 4) {
+function preprocessForOCR(imageSrc, scale = 2.0) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'Anonymous';
     img.onload = () => {
-      const srcY      = Math.floor(img.height * startYFrac);
-      const srcHeight = Math.floor(img.height * heightFrac);
-      const srcWidth  = img.width;
-
       const canvas = document.createElement('canvas');
-      canvas.width  = Math.floor(srcWidth  * scale);
-      canvas.height = Math.floor(srcHeight * scale);
+      canvas.width  = Math.floor(img.width  * scale);
+      canvas.height = Math.floor(img.height * scale);
 
       const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-      // Smooth scaling for small text — bilinear interpolation keeps curves intact
-      ctx.imageSmoothingEnabled  = true;
-      ctx.imageSmoothingQuality  = 'high';
-      ctx.drawImage(img, 0, srcY, srcWidth, srcHeight, 0, 0, canvas.width, canvas.height);
-
-      // Grayscale + mild contrast boost (no hard binarization)
-      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const d = imgData.data;
-
+      // Grayscale + mild contrast boost (no binarization)
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d    = data.data;
       for (let i = 0; i < d.length; i += 4) {
-        // Weighted luminance (perceptual)
-        const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-        // Contrast stretch: darken darks, brighten brights (S-curve approximation)
-        const boosted = Math.min(255, Math.max(0, (gray - 128) * 1.5 + 128));
-        d[i]     = boosted;
-        d[i + 1] = boosted;
-        d[i + 2] = boosted;
-        // alpha stays
+        const gray    = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        const boosted = Math.min(255, Math.max(0, (gray - 128) * 1.4 + 128));
+        d[i] = d[i + 1] = d[i + 2] = boosted;
       }
-
-      ctx.putImageData(imgData, 0, 0);
-      resolve(canvas.toDataURL('image/png')); // PNG for lossless OCR input
+      ctx.putImageData(data, 0, 0);
+      resolve(canvas.toDataURL('image/png'));
     };
     img.onerror = reject;
     img.src = imageSrc;
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TEXT PARSERS
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * Extracts a "###/###" style card number from raw OCR text.
- * Handles common OCR misreads:
- *   - 'O' → '0' (letter O misread as zero)
- *   - 'l' or 'I' → '/' (slash misread as pipe/lowercase-L)
- *   - spaces around the slash
- *   - TG01/TG30 trainer gallery format
+ * Extracts a card number (e.g. "072/197") from raw OCR text.
+ * Handles common OCR errors: O→0, l/I/|→/, spaces around slash.
  *
- * @param {string} rawText
+ * @param {string} text
  * @returns {{ number: string, setTotal: string }}
  */
-export function parseCardNumber(rawText) {
-  if (!rawText) return { number: '', setTotal: '' };
+export function parseCardNumber(text) {
+  if (!text) return { number: '', setTotal: '' };
 
-  // Normalise common OCR mistakes before matching
-  const normalised = rawText
-    .replace(/[oO]/g, '0')           // O → 0
-    .replace(/[lI|\\]/g, '/')        // l/I/pipe/backslash → forward slash
-    .replace(/\s+/g, ' ');
+  // Normalise OCR errors
+  const norm = text
+    .replace(/[oO]/g, '0')
+    .replace(/[lIi|\\]/g, '/');
 
-  // Pattern A: standard "072/197"  or  "72/197"
-  const stdMatch = normalised.match(/\b(\d{1,3})\s*\/\s*(\d{1,3})\b/);
-  if (stdMatch) {
+  // Standard: "072/197"  or  "72/197"
+  const m = norm.match(/\b(\d{1,3})\s*\/\s*(\d{1,3})\b/);
+  if (m) {
     return {
-      number:   stdMatch[1].padStart(3, '0'),
-      setTotal: stdMatch[2],
+      number:   m[1].padStart(3, '0'),
+      setTotal: m[2],
     };
   }
 
-  // Pattern B: Trainer Gallery "TG01/TG30" or "GG01/GG30"
-  const tgMatch = normalised.match(/\b(TG\d{2}|GG\d{2}|SV\d{2})\s*\/\s*(TG\d{2}|GG\d{2}|\d{2,3})\b/i);
-  if (tgMatch) {
-    return {
-      number:   tgMatch[1].toUpperCase(),
-      setTotal: tgMatch[2].toUpperCase(),
-    };
+  // Trainer Gallery: "TG01/TG30"
+  const tg = norm.match(/\b(TG\d{2}|GG\d{2}|SV\d{2})\s*\/\s*(\S{2,5})\b/i);
+  if (tg) {
+    return { number: tg[1].toUpperCase(), setTotal: tg[2].toUpperCase() };
   }
 
   return { number: '', setTotal: '' };
 }
 
 /**
- * Performs a quick full-image OCR pass with PSM 6 to extract the Pokémon name
- * from the top region of the card.
+ * Extracts a likely Pokémon name from raw OCR text.
+ * Looks for short (1–3 word) capitalised lines, ignoring TCG keywords.
  *
- * @param {string} imageSrc Data URL of full card image
- * @param {object} worker   Active Tesseract worker
- * @returns {Promise<string>} Detected name or empty string
+ * @param {string} text
+ * @returns {string}
  */
-async function extractNameFromFullImage(imageSrc, worker) {
-  // Crop just the top 20% for name (no processing — raw crop only)
-  const nameImage = await cropFooterStrip(imageSrc, 0.0, 0.20, 2.5);
+export function parsePokemonName(text) {
+  if (!text) return '';
 
-  // PSM 6 = assume a uniform block of text — good for 1–2 word name lines
-  await worker.setParameters({ tessedit_pageseg_mode: '6' });
-  const ret = await worker.recognize(nameImage);
-  return parseRawName(ret.data.text);
-}
-
-/**
- * Clean name text extracted from the header region.
- */
-function parseRawName(rawText) {
-  if (!rawText) return '';
-
-  const stopWords = new Set([
+  const STOP = new Set([
     'BASIC','STAGE','STAGE1','STAGE2','TRAINER','ITEM','SUPPORTER','STADIUM',
-    'ENERGY','POKEMON','POKÉMON','HP','VMAX','VSTAR','EX','GX','EVOLVES','FROM',
-    'RESTORED','ANCIENT','FUTURE','ACE','SPEC',
+    'ENERGY','POKEMON','POKÉMON','HP','VMAX','VSTAR','EX','GX','EVOLVES',
+    'FROM','RESTORED','ANCIENT','FUTURE','ACE','SPEC','RULE','BOX',
   ]);
 
-  const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
   for (const line of lines) {
+    // Strip HP values, numbers, punctuation
     const clean = line
       .replace(/\bHP\s*\d{2,3}\b/gi, '')
       .replace(/\d/g, '')
       .replace(/[^a-zA-ZÀ-ÿ\s\-]/g, '')
       .trim();
 
-    const words = clean.split(/\s+/).filter(w => w.length > 2);
-    const valid = words.filter(w => !stopWords.has(w.toUpperCase()));
+    const words = clean.split(/\s+/).filter(w => w.length >= 3);
+    const valid = words.filter(w => !STOP.has(w.toUpperCase()));
 
+    // Accept 1–3 word names; reject if all uppercase (likely a keyword line)
     if (valid.length >= 1 && valid.length <= 3) {
-      return valid.join(' ');
+      const joined = valid.join(' ');
+      // Skip ALL-CAPS short strings that are usually section headers
+      if (joined === joined.toUpperCase() && joined.length < 6) continue;
+      return joined;
     }
   }
+
   return '';
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN SCANNER
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * Main entry point: scans a captured card image, extracts number + name,
- * then queries the Pokémon TCG API for matching cards.
+ * Scans a captured card image with a two-pass OCR strategy:
  *
- * OCR Strategy (optimized):
- *   1. Crop bottom 18% of image (card number footer)
- *   2. Upscale 4× with smooth interpolation
- *   3. Grayscale + mild S-curve contrast (NO hard binarization)
- *   4. Tesseract PSM 7 (single text line) → extract "072/197" pattern
- *   5. If number found → also do quick name OCR on top 20%
- *   6. Query API: number-first for precision; name-only fallback
+ *   Pass 1 — Full image, PSM 3 (auto layout), no whitelist.
+ *             Reliable for finding the Pokémon name in the card header.
  *
- * @param {string} imageSrc    Data URL of captured image
- * @param {Function} onProgress Progress callback ({status, percent, message})
+ *   Pass 2 — Full image, PSM 6 (block of text), no whitelist.
+ *             Second attempt to find "072/197" number if Pass 1 missed it.
+ *
+ * Why full image instead of cropped zones?
+ *   The camera viewfinder guide is CSS-only — the actual captured canvas is
+ *   the full camera sensor frame (e.g. 1280×720). The card may occupy only
+ *   40–70% of that frame. Cropping by fixed % of the canvas often misses the
+ *   card entirely. Scanning the full image is more robust.
+ *
+ * @param {string} imageSrc    DataURL from canvas capture
+ * @param {Function} onProgress  ({ status, percent, message }) callback
  */
 export async function scanAndIdentifyCard(imageSrc, onProgress) {
   let worker = null;
 
+  const progress = (status, percent, message) => {
+    if (onProgress) onProgress({ status, percent, message });
+  };
+
   try {
-    // ── Step 1: Pre-process the bottom footer strip ──────────────────────────
-    if (onProgress) onProgress({
-      status: 'preprocessing',
-      percent: 15,
-      message: 'Recortando zona del número de carta...',
-    });
+    // ── Pre-process ───────────────────────────────────────────────────────────
+    progress('preprocessing', 15, 'Preparando imagen para OCR...');
+    const processedImage = await preprocessForOCR(imageSrc, 2.0);
 
-    const footerImage = await cropFooterStrip(imageSrc, 0.82, 0.18, 4);
-
-    // ── Step 2: Init Tesseract ───────────────────────────────────────────────
-    if (onProgress) onProgress({
-      status: 'ocr_loading',
-      percent: 30,
-      message: 'Iniciando reconocimiento óptico...',
-    });
-
+    // ── Init Tesseract ────────────────────────────────────────────────────────
+    progress('ocr_loading', 28, 'Iniciando motor de reconocimiento...');
     worker = await createWorker('eng');
 
-    // Allowlist only digits and slash — reduces OCR noise dramatically
+    // ── Pass 1: PSM 3 — Auto layout detection ─────────────────────────────────
+    progress('ocr_pass1', 45, 'Leyendo carta completa (pasada 1)...');
     await worker.setParameters({
-      tessedit_pageseg_mode: '7',           // PSM 7 = single text line
-      tessedit_char_whitelist: '0123456789/\\|lIOoTGGgSV ',
+      tessedit_pageseg_mode: '3',   // Fully automatic page segmentation
+      tessedit_char_whitelist: '',  // NO whitelist — read everything
     });
+    const pass1 = await worker.recognize(processedImage);
+    const text1 = pass1.data.text;
 
-    // ── Step 3: OCR the footer strip ─────────────────────────────────────────
-    if (onProgress) onProgress({
-      status: 'reading_number',
-      percent: 55,
-      message: 'Extrayendo número de carta (ej: 072/197)...',
-    });
+    // Try to extract number and name from Pass 1
+    let { number, setTotal } = parseCardNumber(text1);
+    let name = parsePokemonName(text1);
 
-    const footerRet = await worker.recognize(footerImage);
-    const { number, setTotal } = parseCardNumber(footerRet.data.text);
-
-    // ── Step 4: Try to get name if we have a card number ─────────────────────
-    let detectedName = '';
-    if (number) {
-      if (onProgress) onProgress({
-        status: 'reading_name',
-        percent: 70,
-        message: 'Leyendo nombre del Pokémon...',
-      });
-      // Reset whitelist for name scan
+    // ── Pass 2: PSM 6 — if number still missing ───────────────────────────────
+    let text2 = '';
+    if (!number) {
+      progress('ocr_pass2', 68, 'Segunda pasada para buscar número...');
       await worker.setParameters({
-        tessedit_pageseg_mode: '6',
-        tessedit_char_whitelist: '',        // allow all chars for name
+        tessedit_pageseg_mode: '6',  // Assume a single uniform block of text
+        tessedit_char_whitelist: '',
       });
-      const nameImage = await cropFooterStrip(imageSrc, 0.0, 0.20, 2.5);
-      const nameRet   = await worker.recognize(nameImage);
-      detectedName    = parseRawName(nameRet.data.text);
+      const pass2 = await worker.recognize(processedImage);
+      text2 = pass2.data.text;
+
+      const r2 = parseCardNumber(text2);
+      if (r2.number) { number = r2.number; setTotal = r2.setTotal; }
+      if (!name) name = parsePokemonName(text2);
     }
 
     await worker.terminate();
     worker = null;
 
-    // ── Step 5: Build search query ────────────────────────────────────────────
-    const parsed = {
-      name:     detectedName,
-      number,
-      setTotal,
-      setCode:  '',            // set code detection removed (unreliable from OCR)
-      raw:      footerRet.data.text,
-    };
+    const fullRawText = [text1, text2].filter(Boolean).join('\n---\n');
 
-    const hasNumber = !!number;
-    const hasName   = !!detectedName;
+    // ── Build parsed result ───────────────────────────────────────────────────
+    const parsed = { name, number, setTotal, setCode: '', raw: fullRawText };
 
-    const summaryTag = [
-      hasName   ? detectedName : '',
-      hasNumber ? `${number}/${setTotal}` : '',
+    const tag = [
+      name,
+      number ? `${number}${setTotal ? `/${setTotal}` : ''}` : '',
     ].filter(Boolean).join(' ');
 
-    if (onProgress) onProgress({
-      status: 'searching_api',
-      percent: 85,
-      message: `Buscando "${summaryTag || 'carta'}" en la base de datos...`,
-    });
+    progress('searching_api', 82, `Buscando "${tag || 'carta'}" en la base de datos...`);
 
-    // Prefer number-first search for maximum precision
-    // Fall back to name-only if no number found
-    let matchingCards = [];
-    if (hasNumber) {
-      matchingCards = await searchPokemonCards(parsed, 20);
-    } else if (hasName) {
-      matchingCards = await searchPokemonCards(detectedName, 15);
+    // Search strategy: number → name → empty (UI handles with manual field)
+    let cards = [];
+    if (number) {
+      cards = await searchPokemonCards(parsed, 20);
+    } else if (name) {
+      cards = await searchPokemonCards(name, 20);
     }
-    // If nothing detected at all, return empty (UI handles with editable field)
 
-    if (onProgress) onProgress({
-      status: 'done',
-      percent: 100,
-      message: hasNumber
-        ? `¡Número detectado: ${number}/${setTotal}!`
-        : hasName
-          ? `¡Nombre detectado: ${detectedName}!`
-          : 'OCR completado — edita la búsqueda manualmente.',
-    });
+    progress('done', 100,
+      number  ? `¡Número detectado: ${number}/${setTotal}!` :
+      name    ? `¡Nombre detectado: ${name}!` :
+                'OCR completado — escribe el número manualmente.'
+    );
 
-    return {
-      success: true,
-      parsed,
-      cards:   matchingCards,
-      rawText: footerRet.data.text,
-    };
+    return { success: true, parsed, cards, rawText: fullRawText };
 
   } catch (error) {
-    if (worker) {
-      try { await worker.terminate(); } catch (_) { /* ignore */ }
-    }
-    console.error('[CardScanner] Error:', error);
-    return {
-      success: false,
-      error:   error.message || 'Error al procesar la imagen',
-    };
+    if (worker) { try { await worker.terminate(); } catch (_) {} }
+    console.error('[CardScanner]', error);
+    return { success: false, error: error.message || 'Error al escanear la imagen' };
   }
 }
