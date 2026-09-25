@@ -7,22 +7,23 @@ import { scanAndIdentifyCard } from '../../services/cardScanner';
 import { searchPokemonCards } from '../../services/pokemonApi';
 
 export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 25 }) {
-  const [stream,         setStream]         = useState(null);
-  const [capturedImage,  setCapturedImage]  = useState(null);
-  const [isScanning,     setIsScanning]     = useState(false);
-  const [scanProgress,   setScanProgress]   = useState(null);
-  const [scanResults,    setScanResults]    = useState(null);
-  const [cameraError,    setCameraError]    = useState(null);
-  const [detectedData,   setDetectedData]   = useState(null);   // { name, number, setTotal, raw }
+  const [stream,        setStream]        = useState(null);
+  const [capturedImage, setCapturedImage] = useState(null);
+  const [isScanning,    setIsScanning]    = useState(false);
+  const [scanProgress,  setScanProgress]  = useState(null);
+  const [scanResults,   setScanResults]   = useState(null);
+  const [cameraError,   setCameraError]   = useState(null);
+  const [detectedData,  setDetectedData]  = useState(null);
 
-  // ── Editable search field shown immediately after scan ──────────────────────
-  const [searchQuery,    setSearchQuery]    = useState('');
-  const [isSearching,    setIsSearching]    = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
 
-  const videoRef    = useRef(null);
-  const canvasRef   = useRef(null);
-  const fileInputRef = useRef(null);
-  const searchInputRef = useRef(null);
+  const videoRef        = useRef(null);
+  const canvasRef       = useRef(null);
+  const viewfinderRef   = useRef(null);  // the visible container box
+  const cameraInputRef  = useRef(null);  // capture="environment" → opens camera
+  const galleryInputRef = useRef(null);  // NO capture attr → opens gallery
+  const searchInputRef  = useRef(null);
 
   // ── Camera lifecycle ────────────────────────────────────────────────────────
   const startCamera = async () => {
@@ -33,8 +34,8 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: 'environment' },
-          width:  { ideal: 1280 },
-          height: { ideal: 720 },
+          width:  { ideal: 1920 },
+          height: { ideal: 1080 },
         },
         audio: false,
       });
@@ -43,7 +44,7 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
       if (videoRef.current) videoRef.current.srcObject = mediaStream;
     } catch (err) {
       console.warn('Camera error:', err);
-      setCameraError('No se pudo abrir la cámara. Puedes subir una foto desde tu galería.');
+      setCameraError('No se pudo abrir la cámara. Usa el botón de galería para subir una foto.');
     }
   };
 
@@ -56,22 +57,48 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
     if (stream) { stream.getTracks().forEach(t => t.stop()); setStream(null); }
   };
 
-  // ── Capture from live video ─────────────────────────────────────────────────
+  // ── Capture: crop to exactly what object-cover shows on screen ─────────────
+  // The video element uses CSS `object-cover` which scales/crops the sensor
+  // frame to fill the container box. If we just do canvas.drawImage(video) we
+  // capture the full uncropped sensor frame — making the card tiny with lots of
+  // empty space. We compute the crop rectangle so the canvas matches what the
+  // user sees in the viewfinder.
   const handleCapturePhoto = () => {
-    if (!videoRef.current) return;
-    const video  = videoRef.current;
+    const video     = videoRef.current;
+    const container = viewfinderRef.current;
+    if (!video || !container) return;
+
+    const vW = video.videoWidth  || 640;
+    const vH = video.videoHeight || 480;
+    const cW = container.clientWidth;
+    const cH = container.clientHeight;
+
+    // object-cover: scale up until both dimensions are filled
+    const scale   = Math.max(cW / vW, cH / vH);
+    const scaledW = vW * scale;
+    const scaledH = vH * scale;
+
+    // Source rectangle in video pixel coordinates
+    const srcX = (scaledW - cW) / 2 / scale;
+    const srcY = (scaledH - cH) / 2 / scale;
+    const srcW = cW / scale;
+    const srcH = cH / scale;
+
     const canvas = canvasRef.current || document.createElement('canvas');
-    canvas.width  = video.videoWidth  || 640;
-    canvas.height = video.videoHeight || 480;
-    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+    canvas.width  = Math.round(srcW);
+    canvas.height = Math.round(srcH);
+
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, canvas.width, canvas.height);
+
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
     setCapturedImage(dataUrl);
     stopCamera();
     runOCR(dataUrl);
   };
 
-  // ── Upload from gallery ─────────────────────────────────────────────────────
-  const handleFileUpload = (e) => {
+  // ── Handle file selection (camera shortcut or gallery) ─────────────────────
+  const handleFileInput = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
@@ -82,9 +109,11 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
       runOCR(dataUrl);
     };
     reader.readAsDataURL(file);
+    // Reset so same file can be re-selected if needed
+    e.target.value = '';
   };
 
-  // ── Run OCR pipeline ────────────────────────────────────────────────────────
+  // ── OCR pipeline ────────────────────────────────────────────────────────────
   const runOCR = async (imageDataUrl) => {
     setIsScanning(true);
     setScanProgress({ percent: 10, message: 'Iniciando escáner...' });
@@ -97,7 +126,6 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
     setIsScanning(false);
 
     if (!result.success) {
-      // Even on error: show editable field so user can type manually
       setDetectedData({ name: '', number: '', setTotal: '', raw: '' });
       setSearchQuery('');
       setScanResults([]);
@@ -108,7 +136,6 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
     const { parsed, cards } = result;
     setDetectedData(parsed);
 
-    // Build a smart default query for the editable field
     const defaultQuery = [
       parsed.name,
       parsed.number ? `${parsed.number}${parsed.setTotal ? `/${parsed.setTotal}` : ''}` : '',
@@ -117,11 +144,10 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
     setSearchQuery(defaultQuery);
     setScanResults(cards);
 
-    // Focus the search input so user can immediately edit if needed
     setTimeout(() => searchInputRef.current?.focus(), 150);
   };
 
-  // ── Manual search from editable field ──────────────────────────────────────
+  // ── Manual search ───────────────────────────────────────────────────────────
   const handleSearch = async (e) => {
     e?.preventDefault();
     const q = searchQuery.trim();
@@ -129,7 +155,6 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
 
     setIsSearching(true);
     try {
-      // If the query looks like "072/197" or "72/197" → search by number
       const numMatch = q.match(/^(\d{1,3})\s*\/\s*(\d{1,3})$/);
       if (numMatch) {
         const cards = await searchPokemonCards(
@@ -163,18 +188,20 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
     <div className="space-y-4">
 
       {/* ── Viewfinder ──────────────────────────────────────────────────── */}
-      <div className="relative w-full max-w-sm mx-auto h-[360px] bg-slate-950 rounded-3xl overflow-hidden border-2 border-slate-800 shadow-2xl">
-
+      <div
+        ref={viewfinderRef}
+        className="relative w-full max-w-sm mx-auto h-[360px] bg-slate-950 rounded-3xl overflow-hidden border-2 border-slate-800 shadow-2xl"
+      >
         {!capturedImage ? (
           <>
-            {/* Live video feed */}
+            {/* Live video — object-cover crops sensor to fill box */}
             <video
               ref={videoRef}
               autoPlay playsInline muted
               className="absolute inset-0 w-full h-full object-cover"
             />
 
-            {/* Card-shaped guide overlay */}
+            {/* Guide overlay */}
             <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center pb-16">
               <div className="w-[200px] aspect-[2.5/3.5] border-2 border-amber-400/90 rounded-2xl shadow-[0_0_0_9999px_rgba(2,6,23,0.55)] relative">
                 {/* Corner markers */}
@@ -186,7 +213,6 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
                   <div key={i} className={`absolute ${cls} w-4 h-4 border-amber-400 shadow-[0_0_8px_#f59e0b]`} />
                 ))}
 
-                {/* Number zone indicator */}
                 <div className="absolute bottom-1.5 left-1.5 right-1.5 border border-dashed border-amber-400/50 rounded px-1 py-0.5 text-center">
                   <span className="text-[8px] font-bold text-amber-300 flex items-center justify-center gap-0.5">
                     <Hash className="w-2 h-2" /> Zona número (ej: 072/197)
@@ -203,15 +229,18 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
 
             {/* Shutter bar */}
             <div className="absolute bottom-0 inset-x-0 p-3 bg-gradient-to-t from-slate-950 via-slate-950/80 to-transparent flex items-center justify-around z-30">
+
+              {/* Gallery button — opens photo picker WITHOUT forcing camera */}
               <button
                 type="button"
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => galleryInputRef.current?.click()}
                 className="w-11 h-11 rounded-2xl bg-slate-900/90 border border-slate-700 text-slate-200 flex items-center justify-center shadow-lg active:scale-90 transition-all"
-                title="Subir foto"
+                title="Abrir galería de fotos"
               >
                 <ImageIcon className="w-5 h-5 text-emerald-400" />
               </button>
 
+              {/* Shutter */}
               <button
                 type="button"
                 onClick={handleCapturePhoto}
@@ -223,6 +252,7 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
                 </div>
               </button>
 
+              {/* Close */}
               <button
                 type="button"
                 onClick={onCancel}
@@ -234,13 +264,16 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
             </div>
           </>
         ) : (
-          /* Captured image + scanning overlay */
+          /* Captured image preview */
           <div className="relative w-full h-full">
-            <img src={capturedImage} alt="Captura" className="w-full h-full object-contain bg-slate-950" />
+            <img
+              src={capturedImage}
+              alt="Captura"
+              className="w-full h-full object-contain bg-slate-950"
+            />
 
             {isScanning && (
               <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-[2px] flex flex-col items-center justify-center p-5 z-20">
-                {/* Laser scanner line */}
                 <div className="w-4/5 h-0.5 bg-gradient-to-r from-transparent via-amber-400 to-transparent shadow-[0_0_16px_#f59e0b] animate-bounce mb-6" />
                 <Loader2 className="w-9 h-9 text-amber-400 animate-spin mb-3" />
                 <span className="text-sm font-black text-white text-center">
@@ -260,16 +293,28 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
         <canvas ref={canvasRef} className="hidden" />
       </div>
 
+      {/* 
+        Two separate file inputs:
+        - cameraInputRef:  capture="environment" → shortcut to camera app on mobile
+        - galleryInputRef: NO capture attr → opens the actual photo gallery picker
+      */}
       <input
         type="file"
-        ref={fileInputRef}
-        onChange={handleFileUpload}
+        ref={cameraInputRef}
+        onChange={handleFileInput}
         accept="image/*"
         capture="environment"
         className="hidden"
       />
+      <input
+        type="file"
+        ref={galleryInputRef}
+        onChange={handleFileInput}
+        accept="image/*"
+        className="hidden"
+      />
 
-      {/* Retake button */}
+      {/* Retake */}
       {capturedImage && !isScanning && (
         <div className="flex justify-center">
           <button
@@ -283,7 +328,7 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
         </div>
       )}
 
-      {/* Camera error */}
+      {/* Error */}
       {cameraError && (
         <div className="p-3 bg-rose-500/15 border border-rose-500/30 rounded-2xl text-xs text-rose-300 flex items-center gap-2 max-w-sm mx-auto">
           <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
@@ -291,11 +336,10 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
         </div>
       )}
 
-      {/* ── Results panel (shown after scan, even if 0 results) ──────────── */}
+      {/* ── Results panel ─────────────────────────────────────────────────── */}
       {detectedData !== null && !isScanning && (
         <div className="space-y-3 pt-1">
 
-          {/* ── Editable search field — ALWAYS visible after scan ────────── */}
           <div className="p-3 bg-slate-950/90 rounded-2xl border border-slate-800 space-y-2">
             <div className="flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
@@ -304,12 +348,11 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
                   ? `Número detectado: ${detectedData.number}${detectedData.setTotal ? `/${detectedData.setTotal}` : ''}`
                   : detectedData.name
                     ? `Nombre detectado: ${detectedData.name}`
-                    : 'No se detectó texto — escribe el número o nombre manualmente:'
+                    : 'Escribe el número o nombre de la carta:'
                 }
               </span>
             </div>
 
-            {/* Detected chips (quick info) */}
             {(detectedData.number || detectedData.name) && (
               <div className="flex flex-wrap gap-1.5">
                 {detectedData.number && (
@@ -325,7 +368,6 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
               </div>
             )}
 
-            {/* Main editable search bar */}
             <form onSubmit={handleSearch} className="flex gap-1.5">
               <input
                 ref={searchInputRef}
@@ -349,11 +391,10 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
             </form>
 
             <p className="text-[10px] text-slate-500">
-              Puedes escribir el número (ej: <span className="text-slate-400 font-bold">072/197</span>), nombre, o nombre + número para mayor precisión.
+              Escribe el número (ej: <span className="text-slate-400 font-bold">072/197</span>), nombre, o nombre + número.
             </p>
           </div>
 
-          {/* ── Card results grid ─────────────────────────────────────────── */}
           {scanResults !== null && (
             <div>
               <span className="text-xs font-bold text-white block mb-2">
@@ -365,7 +406,7 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
 
               {scanResults.length === 0 ? (
                 <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-800 text-center text-xs text-slate-400">
-                  No encontramos coincidencias. Intenta escribir solo el número (ej: <strong className="text-slate-300">072/197</strong>) o solo el nombre.
+                  No encontramos coincidencias. Escribe el número (ej: <strong className="text-slate-300">072/197</strong>) o solo el nombre.
                 </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[290px] overflow-y-auto p-1">
@@ -394,7 +435,7 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
                         {card.set?.name} · #{card.number}
                       </div>
                       <div className="text-xs font-black text-amber-400 mt-1">
-                        ${card.marketPriceUsd?.toFixed(2)} · L.{(card.marketPriceUsd * exchangeRate).toFixed(0)}
+                        \${card.marketPriceUsd?.toFixed(2)} · L.{(card.marketPriceUsd * exchangeRate).toFixed(0)}
                       </div>
                     </div>
                   ))}
