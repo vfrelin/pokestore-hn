@@ -2,48 +2,181 @@
 
 const BASE_URL = 'https://api.pokemontcg.io/v2';
 
+// Common 3-letter set codes mapping to Pokemon TCG API set IDs
+const SET_CODE_MAP = {
+  'OBF': 'sv3',        // Obsidian Flames
+  'MEW': 'sv3pt5',    // 151
+  '151': 'sv3pt5',    // 151
+  'PAL': 'sv2',        // Paldea Evolved
+  'SVI': 'sv1',        // Scarlet & Violet Base
+  'PAR': 'sv4',        // Paradox Rift
+  'PAF': 'sv4a',       // Paldean Fates
+  'TEF': 'sv5',        // Temporal Forces
+  'TWM': 'sv6',        // Twilight Masquerade
+  'SFA': 'sv6pt5',    // Shrouded Fable
+  'SCR': 'sv7',        // Stellar Crown
+  'SSP': 'sv8',        // Surging Sparks
+  'CRZ': 'swsh12pt5', // Crown Zenith
+  'SIT': 'swsh12',    // Silver Tempest
+  'LOR': 'swsh11',    // Lost Origin
+  'ASR': 'swsh10',    // Astral Radiance
+  'BRS': 'swsh9',     // Brilliant Stars
+  'FST': 'swsh8',     // Fusion Strike
+  'CEL': 'cel25',     // Celebrations
+  'EVS': 'swsh7',     // Evolving Skies
+  'CRE': 'swsh6',     // Chilling Reign
+  'BST': 'swsh5',     // Battle Styles
+  'SHF': 'swsh45',    // Shining Fates
+  'VIV': 'swsh4',     // Vivid Voltage
+  'DAA': 'swsh3',     // Darkness Ablaze
+  'RCL': 'swsh2',     // Rebel Clash
+  'SSH': 'swsh1',     // Sword & Shield Base
+  'HIF': 'sma',       // Hidden Fates
+  'UNM': 'sm11',      // Unified Minds
+  'UNB': 'sm10',      // Unbroken Bonds
+  'TEU': 'sm9',       // Team Up
+  'LOT': 'sm8',       // Lost Thunder
+  'GRI': 'sm2',       // Guardians Rising
+  'SUM': 'sm1',       // Sun & Moon Base
+  'EVO': 'xy12',      // Evolutions
+  'GEN': 'g1',        // Generations
+  'ROS': 'xy6',       // Roaring Skies
+  'BASE': 'base1',    // Base Set
+  'JUNGLE': 'base2',  // Jungle
+  'FOSSIL': 'base3'   // Fossil
+};
+
 /**
- * Search cards from Pokemon TCG API
- * @param {string} query Search keyword (e.g., 'Charizard 151' or 'Pikachu')
+ * Advanced search cards from Pokemon TCG API
+ * @param {string|object} query Search query string or structured object { name, number, setCode, setTotal }
  * @param {number} pageSize Number of results to return
  */
 export async function searchPokemonCards(query, pageSize = 20) {
-  if (!query || query.trim().length === 0) return [];
+  if (!query) return [];
 
-  const cleanQuery = query.trim();
-  
-  // Try building query syntax: if user typed "charizard 151", try searching name:charizard and set.name:*151*
-  let apiQuery = '';
-  const parts = cleanQuery.split(' ');
-  
-  if (parts.length === 1) {
-    apiQuery = `name:"*${parts[0]}*"`;
+  let name = '';
+  let number = '';
+  let setTotal = '';
+  let setCode = '';
+
+  if (typeof query === 'object') {
+    name = query.name || '';
+    number = query.number || '';
+    setTotal = query.setTotal || '';
+    setCode = query.setCode || '';
   } else {
-    // Multi-term: search name containing first part and text in general
-    apiQuery = `name:"*${parts[0]}*"`;
+    // Parse string query (e.g. "Toxtricity 072/197" or "Charizard 199/165 OBF")
+    const clean = query.trim();
+
+    // Check for number pattern "072/197", "72/197", "199/165", "#072"
+    const numberMatch = clean.match(/\b([0-9]{1,3}|TG\d{2}|GG\d{2}|SV\d{2})\s*[\/\\|]\s*([0-9]{1,3})\b/i);
+    const simpleNumMatch = clean.match(/#\s*([0-9]{1,3})\b/);
+
+    if (numberMatch) {
+      number = numberMatch[1];
+      setTotal = numberMatch[2];
+    } else if (simpleNumMatch) {
+      number = simpleNumMatch[1];
+    }
+
+    // Check for 3-letter set codes like "OBF", "PAL", "PAR"
+    const words = clean.split(/\s+/);
+    for (const w of words) {
+      const upper = w.toUpperCase();
+      if (SET_CODE_MAP[upper]) {
+        setCode = upper;
+        break;
+      }
+    }
+
+    // Extract name by removing number and set code patterns
+    name = clean
+      .replace(/\b([0-9]{1,3}|TG\d{2}|GG\d{2}|SV\d{2})\s*[\/\\|]\s*([0-9]{1,3})\b/gi, '')
+      .replace(/#\s*[0-9]{1,3}\b/g, '')
+      .replace(new RegExp(`\\b(${Object.keys(SET_CODE_MAP).join('|')})\\b`, 'gi'), '')
+      .trim();
+  }
+
+  // Clean numbers (remove leading zeros for matching: "072" -> "72")
+  const numVariants = [];
+  if (number) {
+    numVariants.push(`"${number}"`);
+    const noLeadingZeros = number.replace(/^0+/, '');
+    if (noLeadingZeros && noLeadingZeros !== number) {
+      numVariants.push(`"${noLeadingZeros}"`);
+    }
+  }
+
+  // Build Lucene query for Pokemon TCG API
+  const queryParts = [];
+
+  if (name) {
+    // Clean name from special chars for api
+    const safeName = name.replace(/[^a-zA-Z0-9\s\-']/g, '').trim();
+    if (safeName) {
+      queryParts.push(`name:"*${safeName}*"`);
+    }
+  }
+
+  if (numVariants.length > 0) {
+    if (numVariants.length === 1) {
+      queryParts.push(`number:${numVariants[0]}`);
+    } else {
+      queryParts.push(`(number:${numVariants.join(' or number:')})`);
+    }
+  }
+
+  if (setCode && SET_CODE_MAP[setCode.toUpperCase()]) {
+    const setId = SET_CODE_MAP[setCode.toUpperCase()];
+    queryParts.push(`set.id:"${setId}"`);
+  } else if (setTotal) {
+    queryParts.push(`set.printedTotal:"${setTotal}"`);
+  }
+
+  let apiQuery = queryParts.join(' ');
+  if (!apiQuery) {
+    apiQuery = typeof query === 'string' ? `name:"*${query.trim()}*"` : 'name:"*Pikachu*"';
   }
 
   try {
     const url = `${BASE_URL}/cards?q=${encodeURIComponent(apiQuery)}&pageSize=${pageSize}&orderBy=-set.releaseDate`;
     const response = await fetch(url, {
-      headers: {
-        'Accept': 'application/json'
-      }
+      headers: { 'Accept': 'application/json' }
     });
 
-    if (!response.ok) {
-      // Fallback simple search
-      const fallbackUrl = `${BASE_URL}/cards?q=name:${encodeURIComponent(parts[0])}&pageSize=${pageSize}`;
-      const fallbackRes = await fetch(fallbackUrl);
-      if (!fallbackRes.ok) throw new Error('API Error');
-      const fallbackData = await fallbackRes.json();
-      return formatApiCards(fallbackData.data || []);
+    if (response.ok) {
+      const data = await response.json();
+      if (data.data && data.data.length > 0) {
+        return formatApiCards(data.data);
+      }
     }
 
-    const data = await response.json();
-    return formatApiCards(data.data || []);
+    // Fallback: If combined query was too restrictive, search with name only
+    if (name && (number || setCode || setTotal)) {
+      const fallbackUrl = `${BASE_URL}/cards?q=name:"*${encodeURIComponent(name.replace(/[^a-zA-Z0-9\s]/g, ''))}*"&pageSize=${pageSize}&orderBy=-set.releaseDate`;
+      const fallbackRes = await fetch(fallbackUrl);
+      if (fallbackRes.ok) {
+        const fallbackData = await fallbackRes.json();
+        const formatted = formatApiCards(fallbackData.data || []);
+        
+        // Sort matching card number to top
+        if (number) {
+          const cleanNum = number.replace(/^0+/, '');
+          formatted.sort((a, b) => {
+            const aNum = a.number.split('/')[0].replace(/^0+/, '');
+            const bNum = b.number.split('/')[0].replace(/^0+/, '');
+            if (aNum === cleanNum && bNum !== cleanNum) return -1;
+            if (bNum === cleanNum && aNum !== cleanNum) return 1;
+            return 0;
+          });
+        }
+        return formatted;
+      }
+    }
+
+    return [];
   } catch (error) {
-    console.warn('Error fetching from Pokémon TCG API, using fallback search:', error);
+    console.warn('Error fetching from Pokémon TCG API:', error);
     return [];
   }
 }
@@ -67,7 +200,6 @@ export function formatApiCards(rawCards) {
     }
 
     if (!marketPrice && c.cardmarket?.prices?.averageSellPrice) {
-      // Approximate Eur to USD conversion if only cardmarket exists
       marketPrice = Number((c.cardmarket.prices.averageSellPrice * 1.08).toFixed(2));
     }
 

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, Image as ImageIcon, Sparkles, RefreshCw, Check, X, AlertCircle, Loader2, Zap } from 'lucide-react';
+import { Camera, Image as ImageIcon, Sparkles, RefreshCw, Check, X, AlertCircle, Loader2, Zap, Search, Edit2 } from 'lucide-react';
 import { scanAndIdentifyCard } from '../../services/cardScanner';
+import { searchPokemonCards } from '../../services/pokemonApi';
 
 export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 25 }) {
   const [stream, setStream] = useState(null);
@@ -10,6 +11,10 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
   const [scanResults, setScanResults] = useState(null);
   const [cameraError, setCameraError] = useState(null);
   const [detectedText, setDetectedText] = useState(null);
+
+  // Manual refine state
+  const [refineQuery, setRefineQuery] = useState('');
+  const [isRefining, setIsRefining] = useState(false);
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -25,7 +30,7 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
 
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: { ideal: 'environment' }, // Uses rear camera on mobile
+          facingMode: { ideal: 'environment' },
           width: { ideal: 1280 },
           height: { ideal: 720 }
         },
@@ -95,7 +100,7 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
   // Run OCR and card identification
   const processScannedImage = async (imageDataUrl) => {
     setIsScanning(true);
-    setScanProgress({ percent: 10, message: 'Iniciando escaneo...' });
+    setScanProgress({ percent: 10, message: 'Iniciando escáner de doble zona...' });
     setScanResults(null);
     setDetectedText(null);
 
@@ -108,8 +113,30 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
     if (result.success) {
       setScanResults(result.cards);
       setDetectedText(result.parsed);
+
+      const refineStr = [
+        result.parsed.name,
+        result.parsed.number ? `${result.parsed.number}${result.parsed.setTotal ? `/${result.parsed.setTotal}` : ''}` : '',
+        result.parsed.setCode
+      ].filter(Boolean).join(' ');
+
+      setRefineQuery(refineStr);
     } else {
       setCameraError(result.error || 'No se pudo identificar la carta. Intenta con mejor iluminación.');
+    }
+  };
+
+  const handleManualRefineSearch = async (e) => {
+    e?.preventDefault();
+    if (!refineQuery.trim()) return;
+    setIsRefining(true);
+    try {
+      const cards = await searchPokemonCards(refineQuery, 15);
+      setScanResults(cards);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsRefining(false);
     }
   };
 
@@ -148,15 +175,23 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
                 <div className="absolute -bottom-1 -left-1 w-4 h-4 border-b-4 border-l-4 border-amber-400 rounded-bl shadow-[0_0_8px_#f59e0b]"></div>
                 <div className="absolute -bottom-1 -right-1 w-4 h-4 border-b-4 border-r-4 border-amber-400 rounded-br shadow-[0_0_8px_#f59e0b]"></div>
 
+                {/* Sub-zone indicators for user alignment */}
+                <div className="absolute top-2 left-2 right-2 border border-dashed border-amber-400/40 rounded px-1 text-center">
+                  <span className="text-[8px] font-bold text-amber-300">Zona Nombre</span>
+                </div>
+                <div className="absolute bottom-2 left-2 right-2 border border-dashed border-amber-400/40 rounded px-1 text-center">
+                  <span className="text-[8px] font-bold text-amber-300">Zona Número (ej: 072/197)</span>
+                </div>
+
                 <div className="absolute -bottom-7 left-0 right-0 text-center">
                   <span className="text-[10px] font-black bg-slate-950/90 text-amber-300 px-2.5 py-1 rounded-full border border-amber-400/40 shadow-lg">
-                    Centra la carta y presiona el botón abajo
+                    Centra la carta y presiona capturar
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Native Mobile Shutter Bar (ALWAYS VISIBLE OVER CAMERA) */}
+            {/* Native Mobile Shutter Bar */}
             <div className="absolute bottom-0 inset-x-0 p-3 bg-gradient-to-t from-slate-950 via-slate-950/80 to-transparent flex items-center justify-around z-30">
               
               {/* Gallery upload shortcut */}
@@ -181,7 +216,7 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
                 </div>
               </button>
 
-              {/* Placeholder balance / Cancel */}
+              {/* Cancel */}
               <button
                 type="button"
                 onClick={onCancel}
@@ -203,7 +238,7 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
 
             {/* Scanning Laser Animation */}
             {isScanning && (
-              <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-[2px] flex flex-col items-center justify-center p-5 z-20">
+              <div className="absolute inset-0 bg-slate-950/75 backdrop-blur-[2px] flex flex-col items-center justify-center p-5 z-20">
                 <div className="w-full h-1 bg-gradient-to-r from-transparent via-amber-400 to-transparent shadow-[0_0_20px_#f59e0b] animate-bounce mb-5"></div>
                 <Loader2 className="w-10 h-10 text-amber-400 animate-spin mb-3" />
                 <span className="text-sm font-black text-white text-center">
@@ -238,10 +273,10 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
           <button
             type="button"
             onClick={handleRetake}
-            className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-2xl text-xs font-black flex items-center gap-2 border border-slate-700 transition-all shadow-lg"
+            className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-2xl text-xs font-black flex items-center gap-2 border border-slate-700 transition-all shadow-lg"
           >
-            <RefreshCw className="w-4 h-4 text-amber-400" />
-            <span>Tomar otra foto de la carta</span>
+            <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
+            <span>Tomar otra foto</span>
           </button>
         </div>
       )}
@@ -254,58 +289,105 @@ export default function CameraScanner({ onSelectCard, onCancel, exchangeRate = 2
         </div>
       )}
 
-      {/* Scanned Results */}
+      {/* Scanned Results & Detected Badges */}
       {scanResults && (
         <div className="space-y-3 pt-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4 text-amber-400" />
-              <span className="text-xs font-bold text-white">
-                Coincidencias encontradas ({scanResults.length}):
+          
+          {/* Detected Data Summary Chips */}
+          <div className="p-3 bg-slate-950/80 rounded-2xl border border-slate-800 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                Datos extraídos de la carta:
               </span>
             </div>
-            {detectedText?.name && (
-              <span className="text-[11px] text-amber-400 font-semibold bg-amber-400/10 px-2 py-0.5 rounded-lg border border-amber-400/20 truncate max-w-[150px]">
-                Detectado: "{detectedText.name}"
-              </span>
-            )}
+
+            <div className="flex flex-wrap gap-1.5 text-[11px]">
+              {detectedText?.name ? (
+                <span className="px-2 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold">
+                  Pokémon: {detectedText.name}
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded-lg bg-slate-800 text-slate-400">
+                  Nombre no detectado
+                </span>
+              )}
+
+              {detectedText?.number && (
+                <span className="px-2 py-0.5 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30 font-black">
+                  #{detectedText.number}{detectedText.setTotal ? `/${detectedText.setTotal}` : ''}
+                </span>
+              )}
+
+              {detectedText?.setCode && (
+                <span className="px-2 py-0.5 rounded-lg bg-blue-500/15 text-blue-300 border border-blue-500/30 font-bold uppercase">
+                  Set: {detectedText.setCode}
+                </span>
+              )}
+            </div>
+
+            {/* Quick Refine Input Bar */}
+            <form onSubmit={handleManualRefineSearch} className="flex gap-1.5 pt-1">
+              <input
+                type="text"
+                value={refineQuery}
+                onChange={(e) => setRefineQuery(e.target.value)}
+                placeholder="Ajustar búsqueda (Ej: Toxtricity 072/197 OBF)..."
+                className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+              />
+              <button
+                type="submit"
+                disabled={isRefining}
+                className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl flex items-center gap-1 shadow disabled:opacity-50"
+              >
+                {isRefining ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                <span>Buscar</span>
+              </button>
+            </form>
           </div>
 
-          {scanResults.length === 0 ? (
-            <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-800 text-center text-xs text-slate-400">
-              No se encontraron coincidencias exactas. Intenta tomar la foto más cerca o usa la pestaña de búsqueda por texto.
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[300px] overflow-y-auto p-1">
-              {scanResults.map((card, idx) => (
-                <div
-                  key={card.id}
-                  onClick={() => onSelectCard(card)}
-                  className={`p-2.5 bg-slate-950 border rounded-2xl cursor-pointer transition-all flex flex-col group active:scale-95 ${
-                    idx === 0
-                      ? 'border-amber-400 shadow-xl shadow-amber-500/15 bg-gradient-to-b from-amber-500/10 to-slate-950 ring-1 ring-amber-400/50'
-                      : 'border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  {idx === 0 && (
-                    <span className="text-[9px] font-black text-amber-300 uppercase tracking-wider mb-1 flex items-center gap-1">
-                      ⭐ Mejor Coincidencia
-                    </span>
-                  )}
-                  <img
-                    src={card.images.small}
-                    alt={card.name}
-                    className="aspect-[2.5/3.5] w-full object-contain rounded-xl mb-1.5 group-hover:scale-105 transition-transform"
-                  />
-                  <div className="text-xs font-bold text-white truncate">{card.name}</div>
-                  <div className="text-[10px] text-slate-400 truncate">{card.set?.name} • #{card.number}</div>
-                  <div className="text-xs font-black text-amber-400 mt-1">
-                    ${card.marketPriceUsd.toFixed(2)} USD (~L. {(card.marketPriceUsd * exchangeRate).toFixed(0)})
+          {/* Cards Grid Results */}
+          <div>
+            <span className="text-xs font-bold text-white block mb-2">
+              Selecciona tu carta ({scanResults.length} {scanResults.length === 1 ? 'coincidencia exacta' : 'resultados'}):
+            </span>
+
+            {scanResults.length === 0 ? (
+              <div className="p-4 bg-slate-950/80 rounded-2xl border border-slate-800 text-center text-xs text-slate-400">
+                No se encontraron cartas con esos datos. Prueba editando el texto en la barra de arriba o tomando la foto más de cerca.
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[300px] overflow-y-auto p-1">
+                {scanResults.map((card, idx) => (
+                  <div
+                    key={card.id}
+                    onClick={() => onSelectCard(card)}
+                    className={`p-2.5 bg-slate-950 border rounded-2xl cursor-pointer transition-all flex flex-col group active:scale-95 ${
+                      idx === 0
+                        ? 'border-amber-400 shadow-xl shadow-amber-500/15 bg-gradient-to-b from-amber-500/10 to-slate-950 ring-2 ring-amber-400/50'
+                        : 'border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    {idx === 0 && (
+                      <span className="text-[9px] font-black text-amber-300 uppercase tracking-wider mb-1 flex items-center gap-1">
+                        ⭐ Coincidencia Exacta
+                      </span>
+                    )}
+                    <img
+                      src={card.images.small}
+                      alt={card.name}
+                      className="aspect-[2.5/3.5] w-full object-contain rounded-xl mb-1.5 group-hover:scale-105 transition-transform"
+                    />
+                    <div className="text-xs font-bold text-white truncate">{card.name}</div>
+                    <div className="text-[10px] text-slate-400 truncate">{card.set?.name} • #{card.number}</div>
+                    <div className="text-xs font-black text-amber-400 mt-1">
+                      ${card.marketPriceUsd.toFixed(2)} USD (~L. {(card.marketPriceUsd * exchangeRate).toFixed(0)})
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
