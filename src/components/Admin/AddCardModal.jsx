@@ -1,11 +1,63 @@
 import React, { useState, useRef } from 'react';
-import { Search, X, Hash, Check, Loader2, Camera, Type, MapPin, AlertCircle } from 'lucide-react';
+import { Search, X, Hash, Check, Loader2, Camera, Type, MapPin, AlertCircle, AlertTriangle, Plus, Ban } from 'lucide-react';
 import { searchPokemonCards } from '../../services/pokemonApi';
 import CameraScanner from './CameraScanner';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Checks if a card from API/search is already registered in existing inventory.
+ * Matches by ID, or by Set + Card Number (standard TCG identifier).
+ */
+export function findDuplicateCard(existingCards, card) {
+  if (!card || !existingCards || !Array.isArray(existingCards) || existingCards.length === 0) {
+    return null;
+  }
+
+  const normalizeNum = (n) => (n || '').toString().toLowerCase().replace(/^0+(\d)/, '$1').replace(/\/0+(\d)/, '/$1').trim();
+  const targetNum = normalizeNum(card.number);
+  const targetNumBase = targetNum.split('/')[0];
+  const targetSetId = (card.set?.id || '').toLowerCase().trim();
+  const targetSetName = (card.set?.name || '').toLowerCase().trim();
+  const targetName = (card.name || '').toLowerCase().trim();
+
+  return existingCards.find(existing => {
+    // 1. Direct ID or prefix match (e.g. swsh7-49-170000000 matches swsh7-49)
+    if (card.id && existing.id) {
+      if (existing.id === card.id) return true;
+      if (existing.id.startsWith(`${card.id}-`)) return true;
+      if (card.id.startsWith(`${existing.id}-`)) return true;
+    }
+
+    const existingNum = normalizeNum(existing.number);
+    const existingNumBase = existingNum.split('/')[0];
+    const existingSetId = (existing.set?.id || '').toLowerCase().trim();
+    const existingSetName = (existing.set?.name || '').toLowerCase().trim();
+    const existingName = (existing.name || '').toLowerCase().trim();
+
+    const sameSet = (targetSetId && existingSetId && targetSetId === existingSetId) ||
+                    (targetSetName && existingSetName && targetSetName === existingSetName);
+
+    // 2. Same set and exact full number (e.g. "49/203" === "49/203")
+    if (sameSet && targetNum && existingNum && targetNum === existingNum) {
+      return true;
+    }
+
+    // 3. Same set and base number (e.g. 49 === 49)
+    if (sameSet && targetNumBase && existingNumBase && targetNumBase === existingNumBase) {
+      return true;
+    }
+
+    // 4. Same Pokemon name + same set + same base number
+    if (targetName && existingName && targetName === existingName && sameSet && targetNumBase === existingNumBase) {
+      return true;
+    }
+
+    return false;
+  }) || null;
+}
 
 /**
  * Detects if a query is a pure card-number pattern and returns a structured
@@ -30,7 +82,14 @@ function parseNumberQuery(q) {
 // COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
 
-export default function AddCardModal({ isOpen, onClose, onAddCard, exchangeRate = 25 }) {
+export default function AddCardModal({
+  isOpen,
+  onClose,
+  onAddCard,
+  onUpdateStock,
+  existingCards = [],
+  exchangeRate = 25
+}) {
   if (!isOpen) return null;
 
   // Text search is the default; camera is secondary
@@ -57,6 +116,9 @@ export default function AddCardModal({ isOpen, onClose, onAddCard, exchangeRate 
   // Live detection of number pattern for UI hints
   const numQuery    = parseNumberQuery(query);
   const isNumQuery  = Boolean(numQuery);
+
+  // Live detection if currently selected card is already registered
+  const duplicateCard = findDuplicateCard(existingCards, selectedCard);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -85,8 +147,27 @@ export default function AddCardModal({ isOpen, onClose, onAddCard, exchangeRate 
     setCustomPriceUsd('');
   };
 
+  const handleAddStockToExisting = () => {
+    if (!duplicateCard) return;
+    const addedQty = parseInt(stock, 10) || 1;
+    const newStock = (duplicateCard.stock || 0) + addedQty;
+    if (onUpdateStock) {
+      onUpdateStock(duplicateCard.id, newStock);
+    }
+    alert(`✅ ¡Stock actualizado! Se sumaron +${addedQty} unidades a "${duplicateCard.name}" (Nuevo stock total: ${newStock}).`);
+    onClose();
+  };
+
   const handleSave = () => {
     if (!selectedCard) return;
+
+    // Strict validation: do not allow duplicate insertion
+    const isDup = findDuplicateCard(existingCards, selectedCard);
+    if (isDup) {
+      alert(`⚠️ Esta carta ya fue ingresada al inventario (${isDup.name} #${isDup.number}). No se permite crear ítems repetidos. Usa la opción de aumentar stock.`);
+      return;
+    }
+
     const locationString = `${albumName} - Pág ${pageNumber} - Casilla ${slotNumber}`;
     const newCard = {
       ...selectedCard,
@@ -251,31 +332,41 @@ export default function AddCardModal({ isOpen, onClose, onAddCard, exchangeRate 
                         {searchResults.length} resultado{searchResults.length !== 1 ? 's' : ''} — selecciona la carta:
                       </span>
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[400px] overflow-y-auto p-1">
-                        {searchResults.map((c, idx) => (
-                          <div
-                            key={c.id}
-                            onClick={() => handleSelectCard(c)}
-                            className={`p-2.5 border rounded-2xl cursor-pointer transition-all flex flex-col group ${
-                              idx === 0
-                                ? 'bg-amber-500/8 border-amber-500/40 hover:border-amber-400'
-                                : 'bg-slate-950/80 border-slate-800 hover:border-amber-400/50 hover:bg-slate-800/80'
-                            }`}
-                          >
-                            {idx === 0 && (
-                              <span className="text-[9px] font-black text-amber-300 uppercase tracking-wider mb-1">⭐ Mejor resultado</span>
-                            )}
-                            <img
-                              src={c.images.small}
-                              alt={c.name}
-                              className="aspect-[2.5/3.5] w-full object-contain rounded-xl mb-2 group-hover:scale-105 transition-transform"
-                            />
-                            <div className="text-xs font-bold text-white truncate">{c.name}</div>
-                            <div className="text-[10px] text-slate-400 truncate">{c.set?.name} · #{c.number}</div>
-                            <div className="text-xs font-black text-amber-400 mt-1">
-                              ${c.marketPriceUsd.toFixed(2)} · L. {(c.marketPriceUsd * exchangeRate).toFixed(0)}
+                        {searchResults.map((c, idx) => {
+                          const duplicate = findDuplicateCard(existingCards, c);
+                          return (
+                            <div
+                              key={c.id}
+                              onClick={() => handleSelectCard(c)}
+                              className={`p-2.5 border rounded-2xl cursor-pointer transition-all flex flex-col group relative ${
+                                duplicate
+                                  ? 'bg-rose-950/20 border-rose-500/50 hover:border-rose-400'
+                                  : idx === 0
+                                    ? 'bg-amber-500/8 border-amber-500/40 hover:border-amber-400'
+                                    : 'bg-slate-950/80 border-slate-800 hover:border-amber-400/50 hover:bg-slate-800/80'
+                              }`}
+                            >
+                              {duplicate ? (
+                                <span className="text-[9px] font-black text-rose-300 uppercase tracking-wider mb-1 flex items-center gap-1">
+                                  <AlertTriangle className="w-2.5 h-2.5 text-rose-400" />
+                                  <span>En inventario ({duplicate.stock})</span>
+                                </span>
+                              ) : idx === 0 ? (
+                                <span className="text-[9px] font-black text-amber-300 uppercase tracking-wider mb-1">⭐ Mejor resultado</span>
+                              ) : null}
+                              <img
+                                src={c.images.small}
+                                alt={c.name}
+                                className="aspect-[2.5/3.5] w-full object-contain rounded-xl mb-2 group-hover:scale-105 transition-transform"
+                              />
+                              <div className="text-xs font-bold text-white truncate">{c.name}</div>
+                              <div className="text-[10px] text-slate-400 truncate">{c.set?.name} · #{c.number}</div>
+                              <div className="text-xs font-black text-amber-400 mt-1">
+                                ${c.marketPriceUsd.toFixed(2)} · L. {(c.marketPriceUsd * exchangeRate).toFixed(0)}
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   ) : (
@@ -332,6 +423,55 @@ export default function AddCardModal({ isOpen, onClose, onAddCard, exchangeRate 
                   Cambiar
                 </button>
               </div>
+
+              {/* ⚠️ Warning Banner: Repeated Card Detected */}
+              {duplicateCard && (
+                <div className="p-4 bg-rose-950/40 border-2 border-rose-500/50 rounded-2xl space-y-3">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 rounded-xl bg-rose-500/20 text-rose-400 shrink-0 mt-0.5">
+                      <Ban className="w-5 h-5" />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded-md bg-rose-500 text-slate-950 font-black text-[10px] uppercase">
+                          Carta Repetida
+                        </span>
+                        <h4 className="font-black text-rose-300 text-sm">
+                          ¡Esta carta ya ha sido ingresada al catálogo!
+                        </h4>
+                      </div>
+                      <p className="text-xs text-slate-300">
+                        Ya tienes inventariada esta carta con <strong className="text-white font-bold">{duplicateCard.stock} {duplicateCard.stock === 1 ? 'copia' : 'copias'}</strong>. El sistema no permite crear otro registro duplicado para la misma carta.
+                      </p>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400 pt-1">
+                        <span className="flex items-center gap-1">
+                          <MapPin className="w-3.5 h-3.5 text-amber-400" />
+                          Ubicación actual: <strong className="text-slate-200">{duplicateCard.location || 'Sin ubicación definida'}</strong>
+                        </span>
+                        <span>
+                          Condición actual: <strong className="text-slate-200">{duplicateCard.condition || 'NM'}</strong> ({duplicateCard.language || 'Inglés'})
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-2.5 border-t border-rose-500/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <p className="text-[11px] text-rose-200/90 font-medium">
+                      ¿Tienes más copias físicas? Súmalas al stock de la carta ya existente:
+                    </p>
+                    {onUpdateStock && (
+                      <button
+                        type="button"
+                        onClick={handleAddStockToExisting}
+                        className="w-full sm:w-auto px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black text-xs rounded-xl flex items-center justify-center gap-1.5 shadow-lg shadow-amber-500/20 whitespace-nowrap active:scale-95 transition-all"
+                      >
+                        <Plus className="w-4 h-4 stroke-[3]" />
+                        <span>Sumar +{stock} al Stock ({duplicateCard.stock} → {duplicateCard.stock + (parseInt(stock, 10) || 1)})</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Form Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
@@ -444,13 +584,24 @@ export default function AddCardModal({ isOpen, onClose, onAddCard, exchangeRate 
             Cancelar
           </button>
           {selectedCard && (
-            <button
-              onClick={handleSave}
-              className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black flex items-center gap-1.5 shadow-lg shadow-emerald-500/20"
-            >
-              <Check className="w-4 h-4 stroke-[3]" />
-              Guardar en Inventario
-            </button>
+            duplicateCard ? (
+              <button
+                type="button"
+                onClick={handleAddStockToExisting}
+                className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black flex items-center gap-1.5 shadow-lg shadow-amber-500/20 active:scale-95 transition-all"
+              >
+                <Plus className="w-4 h-4 stroke-[3]" />
+                Sumar +{stock} al Stock Existente
+              </button>
+            ) : (
+              <button
+                onClick={handleSave}
+                className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-black flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 active:scale-95 transition-all"
+              >
+                <Check className="w-4 h-4 stroke-[3]" />
+                Guardar en Inventario
+              </button>
+            )
           )}
         </div>
       </div>

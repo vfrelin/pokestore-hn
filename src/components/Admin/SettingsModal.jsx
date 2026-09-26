@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { X, Save, Download, Upload, Phone, DollarSign, RefreshCw, Check, Cloud, Key, Copy, Sparkles, Database } from 'lucide-react';
+import { X, Save, Download, Upload, Phone, DollarSign, RefreshCw, Check, Cloud, Key, Copy, Sparkles, Database, ShoppingBag } from 'lucide-react';
 import { exportDatabaseBackup } from '../../services/storage';
 import { SUPABASE_SQL_SETUP, isCloudConfigured, bulkUploadCardsToCloud, getSupabaseClient } from '../../services/supabase';
 
@@ -194,6 +194,24 @@ export default function SettingsModal({
                       required
                     />
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1 flex items-center gap-1">
+                    <ShoppingBag className="w-3.5 h-3.5 text-amber-400" /> Venta Mínima por Pedido (Lempiras):
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="10"
+                    value={formData.minOrderHnl ?? 300}
+                    onChange={(e) => setFormData({ ...formData, minOrderHnl: parseFloat(e.target.value) || 0 })}
+                    className="w-full max-w-xs bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-bold"
+                    required
+                  />
+                  <span className="text-[10px] text-slate-500 mt-0.5 block">
+                    Los clientes no podrán enviar pedidos si no alcanzan este monto (actualmente: L. {Number(formData.minOrderHnl ?? 300).toFixed(0)}).
+                  </span>
                 </div>
 
                 <div>

@@ -137,6 +137,8 @@ export default function AdminPanel({
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         onAddCard={onAddCard}
+        onUpdateStock={onUpdateStock}
+        existingCards={cards}
         exchangeRate={rate}
       />
 

@@ -395,5 +395,6 @@ export const DEFAULT_SETTINGS = {
   allowPriceOverrides: true,
   adminPin: "1234",
   autoIncludeLocationInWhatsApp: true,
-  showDollarAndLempiras: true
+  showDollarAndLempiras: true,
+  minOrderHnl: 300
 };

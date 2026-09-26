@@ -6,6 +6,7 @@ import CardDetailModal from './components/CardDetailModal';
 import CartDrawer from './components/CartDrawer';
 import AdminPanel from './components/Admin/AdminPanel';
 import AdminPinModal from './components/Admin/AdminPinModal';
+import { findDuplicateCard } from './components/Admin/AddCardModal';
 import { getStoredInventory, saveInventory, getStoredSettings, saveSettings } from './services/storage';
 import { INITIAL_SAMPLE_CARDS, DEFAULT_SETTINGS } from './data/initialData';
 import { 
@@ -177,6 +178,12 @@ export default function App() {
 
   // Admin inventory operations (Local + Cloud Realtime)
   const handleAddCard = async (newCard) => {
+    const existing = findDuplicateCard(cards, newCard);
+    if (existing) {
+      alert(`⚠️ La carta "${newCard.name}" (#${newCard.number}) ya existe en el inventario. Se rechazó el ingreso de un ítem duplicado.`);
+      return;
+    }
+
     setCards(prev => [newCard, ...prev]);
     if (supabase) {
       try {

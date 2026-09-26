@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Trash2, Plus, Minus, Send, ShoppingBag, MapPin, User, ArrowRight, Sparkles } from 'lucide-react';
+import { X, Trash2, Plus, Minus, Send, ShoppingBag, MapPin, User, ArrowRight, Sparkles, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { generateWhatsAppOrderUrl } from '../services/storage';
 import confetti from 'canvas-confetti';
 
@@ -32,9 +32,17 @@ export default function CartDrawer({
   });
 
   const totalHnl = totalUsd * rate;
+  const minOrderHnl = Number(settings.minOrderHnl ?? 300);
+  const isBelowMin = totalHnl < minOrderHnl;
+  const missingHnl = Math.max(0, minOrderHnl - totalHnl);
 
   const handleSendOrder = () => {
     if (cartItems.length === 0) return;
+
+    if (isBelowMin) {
+      alert(`⚠️ El pedido mínimo es de L. ${minOrderHnl.toFixed(2)}. Tu pedido actual es de L. ${totalHnl.toFixed(2)} (te faltan L. ${missingHnl.toFixed(2)}). Agrega más cartas para completar tu compra.`);
+      return;
+    }
 
     // Trigger celebratory confetti effect
     try {
@@ -236,13 +244,56 @@ export default function CartDrawer({
                 </div>
               </div>
 
+              {/* Minimum Order Warning & Progress Banner */}
+              {isBelowMin ? (
+                <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 space-y-2">
+                  <div className="flex items-center gap-2 font-black text-xs">
+                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>Venta mínima requerida: L. {minOrderHnl.toFixed(2)}</span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    Solo puedes solicitar pedidos de <strong>L. {minOrderHnl.toFixed(0)} o más</strong>. Te faltan <strong className="text-amber-400 font-bold">L. {missingHnl.toFixed(2)}</strong> para completar el mínimo.
+                  </p>
+                  {/* Visual progress bar towards 300 Lps */}
+                  <div className="w-full bg-slate-950/80 rounded-full h-2 overflow-hidden border border-slate-800">
+                    <div 
+                      className="bg-gradient-to-r from-amber-500 to-orange-400 h-full rounded-full transition-all duration-300"
+                      style={{ width: `${Math.min(100, Math.max(5, (totalHnl / minOrderHnl) * 100))}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[10px] text-slate-400 font-medium">
+                    <span>L. {totalHnl.toFixed(2)} actual</span>
+                    <span className="font-bold text-amber-400">Meta: L. {minOrderHnl.toFixed(0)} ({Math.round((totalHnl / minOrderHnl) * 100)}%)</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 flex items-center gap-2 text-xs font-bold">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>¡Cumples con el pedido mínimo de L. {minOrderHnl.toFixed(0)}! Listo para enviar.</span>
+                </div>
+              )}
+
               {/* Big WhatsApp Checkout Button */}
               <button
                 onClick={handleSendOrder}
-                className="w-full py-4 px-4 bg-gradient-to-r from-emerald-500 via-emerald-600 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-black text-sm rounded-2xl shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2 active:scale-98 transition-all"
+                disabled={isBelowMin}
+                className={`w-full py-4 px-4 font-black text-xs sm:text-sm rounded-2xl flex items-center justify-center gap-2 transition-all ${
+                  isBelowMin
+                    ? 'bg-slate-800/90 text-slate-400 border border-slate-700/80 cursor-not-allowed shadow-none'
+                    : 'bg-gradient-to-r from-emerald-500 via-emerald-600 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 shadow-xl shadow-emerald-500/25 active:scale-98'
+                }`}
               >
-                <Send className="w-4 h-4 text-slate-950" />
-                <span>ENVIAR PEDIDO POR WHATSAPP</span>
+                {isBelowMin ? (
+                  <>
+                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>MÍNIMO DE PEDIDO: L. {minOrderHnl.toFixed(0)} (FALTAN L. {missingHnl.toFixed(2)})</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4 text-slate-950" />
+                    <span>ENVIAR PEDIDO POR WHATSAPP</span>
+                  </>
+                )}
               </button>
 
               <button
