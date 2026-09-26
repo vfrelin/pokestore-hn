@@ -70,7 +70,11 @@ function numberVariants(num) {
  */
 async function fetchCards(url) {
   try {
-    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    const headers = { Accept: 'application/json' };
+    const apiKey = typeof import.meta !== 'undefined' && import.meta.env?.VITE_POKEMON_TCG_API_KEY;
+    if (apiKey) headers['X-Api-Key'] = apiKey;
+
+    const res = await fetch(url, { headers });
     if (!res.ok) return [];
     const data = await res.json();
     return formatApiCards(data.data || []);
@@ -163,9 +167,15 @@ export async function searchPokemonCards(query, pageSize = 20) {
     // Build one query per variant, run in parallel
     const numberQueries = variants.map(v => {
       const parts = [`number:"${v}"`];
-      if (setId)    parts.push(`set.id:"${setId}"`);
-      else if (setTotal) parts.push(`set.printedTotal:"${setTotal}"`);
-      if (safeName) parts.push(`name:"*${safeName}*"`);
+      if (setId) {
+        parts.push(`set.id:"${setId}"`);
+      } else if (setTotal) {
+        // printedTotal is an integer in pokemontcg.io schema - must NOT be quoted
+        parts.push(`set.printedTotal:${parseInt(setTotal, 10)}`);
+      } else if (safeName) {
+        // Only add name filter if no set constraint was provided
+        parts.push(`name:"${safeName}"`);
+      }
       return parts.join(' ');
     });
 
@@ -181,7 +191,17 @@ export async function searchPokemonCards(query, pageSize = 20) {
       return results;
     }
 
-    // Fallback A2: number-only, no set restriction (wider net)
+    // Fallback A2: if number + set had a name that didn't match, or vice versa, try name + number
+    if (results.length === 0 && safeName) {
+      const nameNumQueries = variants.map(v => `name:"${safeName}" number:"${v}"`);
+      const nameNumUrls = nameNumQueries.map(
+        q => `${BASE_URL}/cards?q=${encodeURIComponent(q)}&pageSize=${pageSize}&orderBy=-set.releaseDate`
+      );
+      results = dedup((await Promise.all(nameNumUrls.map(fetchCards))).flat());
+      if (results.length > 0) return sortByNumber(results, number);
+    }
+
+    // Fallback A3: number-only, no set restriction (wider net)
     if (results.length === 0) {
       const wideQueries = variants.map(v => `number:"${v}"`);
       const wideUrls = wideQueries.map(
@@ -191,9 +211,9 @@ export async function searchPokemonCards(query, pageSize = 20) {
       if (results.length > 0) return sortByNumber(results, number);
     }
 
-    // Fallback A3: name-only if still nothing
+    // Fallback A4: name-only if still nothing
     if (results.length === 0 && safeName) {
-      const nameUrl = `${BASE_URL}/cards?q=${encodeURIComponent(`name:"*${safeName}*"`)}&pageSize=${pageSize}&orderBy=-set.releaseDate`;
+      const nameUrl = `${BASE_URL}/cards?q=${encodeURIComponent(`name:"${safeName}"`)}&pageSize=${pageSize}&orderBy=-set.releaseDate`;
       results = await fetchCards(nameUrl);
       return sortByNumber(results, number);
     }
@@ -203,7 +223,7 @@ export async function searchPokemonCards(query, pageSize = 20) {
 
   // ── Strategy B: Name-based search ───────────────────────────────────────────
   if (safeName) {
-    const parts = [`name:"*${safeName}*"`];
+    const parts = [`name:"${safeName}"`];
     if (setId) parts.push(`set.id:"${setId}"`);
 
     const primaryUrl = `${BASE_URL}/cards?q=${encodeURIComponent(parts.join(' '))}&pageSize=${pageSize}&orderBy=-set.releaseDate`;
@@ -211,7 +231,7 @@ export async function searchPokemonCards(query, pageSize = 20) {
 
     // Fallback B2: name without set restriction
     if (results.length === 0 && setId) {
-      const fallbackUrl = `${BASE_URL}/cards?q=${encodeURIComponent(`name:"*${safeName}*"`)}&pageSize=${pageSize}&orderBy=-set.releaseDate`;
+      const fallbackUrl = `${BASE_URL}/cards?q=${encodeURIComponent(`name:"${safeName}"`)}&pageSize=${pageSize}&orderBy=-set.releaseDate`;
       results = await fetchCards(fallbackUrl);
     }
 
